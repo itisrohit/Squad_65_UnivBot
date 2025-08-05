@@ -64,6 +64,7 @@ export default function ChatPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isPastEventsOpen, setIsPastEventsOpen] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [isUploading, setIsUploading] = useState(false)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -101,20 +102,93 @@ export default function ChatPage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value)
-
     // Auto-resize textarea
-    const textarea = e.target
-    textarea.style.height = "auto"
-    textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px"
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+    }
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('📁 File selected:', e.target.files)
     const files = Array.from(e.target.files || [])
-    setSelectedFiles(files)
+    if (files.length > 0) {
+      const file = files[0]
+      console.log('📄 Processing file:', file.name, file.type, file.size)
+      
+      // Validate file type
+      const allowedTypes = [
+        'application/pdf',
+        'text/plain',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ]
+      
+      if (!allowedTypes.includes(file.type)) {
+        alert('❌ Unsupported file type. Please upload PDF, TXT, or DOCX files only.')
+        return
+      }
+      
+      // Validate file size (10MB limit)
+      const maxSize = 10 * 1024 * 1024 // 10MB
+      if (file.size > maxSize) {
+        alert('❌ File size too large. Maximum size is 10MB.')
+        return
+      }
+      
+      setSelectedFiles(prev => [...prev, ...files])
+      handleFileUpload(file) // Process the first file
+    }
   }
 
   const handleAttachmentClick = () => {
+    console.log('📎 Attachment button clicked')
+    console.log('🔍 Session user:', session?.user)
+    console.log('🔍 File input ref:', fileInputRef.current)
     fileInputRef.current?.click()
+  }
+
+  const handleFileUpload = async (file: File) => {
+    console.log('🚀 Starting file upload for:', file.name)
+    
+    if (!session?.user) {
+      console.log("❌ User not authenticated, skipping file upload")
+      return
+    }
+
+    console.log('✅ User authenticated, proceeding with upload')
+    setIsUploading(true)
+    
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      console.log('📦 FormData created with file:', file.name)
+
+      console.log('🌐 Sending request to /api/upload')
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      console.log('📡 Response status:', response.status, response.statusText)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ Upload failed:', errorText)
+        throw new Error(`Upload failed: ${response.statusText} - ${errorText}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ File uploaded and processed successfully:', result)
+      
+      // You can store the chunks in state or context for later use in RAG
+      // For now, we're just logging them
+      
+    } catch (error) {
+      console.error('❌ File upload error:', error)
+    } finally {
+      setIsUploading(false)
+      console.log('🏁 Upload process completed')
+    }
   }
 
   const removeFile = (index: number) => {
@@ -237,6 +311,10 @@ export default function ChatPage() {
                   <p className="text-muted-foreground max-w-md leading-relaxed mb-6">
                     I'm here to help you with your campus queries. Chat functionality will be enabled soon.
                   </p>
+                  {/* Helper text for file upload */}
+                  <div className="text-xs text-muted-foreground">
+                    📎 Supported formats: PDF, TXT, DOCX • Max size: 10MB
+                  </div>
                 </div>
               ) : (
                 // Show welcome message for unauthenticated users
@@ -265,27 +343,49 @@ export default function ChatPage() {
                     onKeyDown={handleKeyDown}
                     placeholder={session?.user ? "Chat functionality coming soon..." : "Sign in to start chatting..."}
                     className="min-h-[52px] max-h-[120px] resize-none rounded-2xl border-2 focus:border-blue-500 transition-all duration-200 pr-12 py-3"
-                    disabled={true}
+                    disabled={!session?.user}
                     rows={1}
+                  />
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.txt,.docx"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    multiple={false}
                   />
                   {/* Attachment Button */}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-blue-100 hover:text-blue-600 transition-colors duration-200"
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 transition-colors duration-200 ${
+                      session?.user 
+                        ? 'hover:bg-blue-100 hover:text-blue-600' 
+                        : 'text-gray-400 cursor-not-allowed'
+                    }`}
                     onClick={handleAttachmentClick}
-                    disabled={true}
+                    disabled={!session?.user || isUploading}
+                    title={session?.user ? "Upload PDF, TXT, or DOCX (max 10MB)" : "Sign in to upload files"}
                   >
-                    <Paperclip className="h-4 w-4" />
+                    {isUploading ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                    ) : (
+                      <Paperclip className="h-4 w-4" />
+                    )}
                     <span className="sr-only">Attach file</span>
                   </Button>
                 </div>
                 <Button
                   type="submit"
                   size="lg"
-                  disabled={true}
-                  className="h-[52px] w-[52px] rounded-2xl bg-gray-300 text-gray-500 cursor-not-allowed"
+                  disabled={!session?.user}
+                  className={`h-[52px] w-[52px] rounded-2xl transition-all duration-200 ${
+                    session?.user 
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white' 
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
                 >
                   <Send className="h-5 w-5" />
                   <span className="sr-only">Send message</span>
