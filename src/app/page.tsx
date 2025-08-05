@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef} from "react"
+import { useState, useRef, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import {
   Send,
@@ -65,9 +65,33 @@ export default function ChatPage() {
   const [isPastEventsOpen, setIsPastEventsOpen] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const [hasGeminiApiKey, setHasGeminiApiKey] = useState(false)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Check if user has Gemini API key
+  useEffect(() => {
+    if (session?.user) {
+      checkGeminiApiKeyStatus()
+    }
+  }, [session])
+
+  const checkGeminiApiKeyStatus = async () => {
+    try {
+      const response = await fetch('/api/user/gemini-api-key')
+      if (response.ok) {
+        const data = await response.json()
+        setHasGeminiApiKey(data.hasApiKey)
+      }
+    } catch (error) {
+      console.error('Error checking Gemini API key status:', error)
+    }
+  }
+
+  const handleApiKeyStatusChange = (hasApiKey: boolean) => {
+    setHasGeminiApiKey(hasApiKey)
+  }
 
   // Auto-scroll to bottom when new messages arrive
   // useEffect(() => {
@@ -341,9 +365,15 @@ export default function ChatPage() {
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    placeholder={session?.user ? "Chat functionality coming soon..." : "Sign in to start chatting..."}
+                    placeholder={
+                      !session?.user 
+                        ? "Sign in to start chatting..." 
+                        : !hasGeminiApiKey 
+                          ? "Configure Gemini API in settings to use UnivBot" 
+                          : "Type something..."
+                    }
                     className="min-h-[52px] max-h-[120px] resize-none rounded-2xl border-2 focus:border-blue-500 transition-all duration-200 pr-12 py-3"
-                    disabled={!session?.user}
+                    disabled={!session?.user || !hasGeminiApiKey}
                     rows={1}
                   />
                   {/* Hidden file input */}
@@ -361,13 +391,19 @@ export default function ChatPage() {
                     variant="ghost"
                     size="sm"
                     className={`absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 transition-colors duration-200 ${
-                      session?.user 
+                      session?.user && hasGeminiApiKey
                         ? 'hover:bg-blue-100 hover:text-blue-600' 
                         : 'text-gray-400 cursor-not-allowed'
                     }`}
                     onClick={handleAttachmentClick}
-                    disabled={!session?.user || isUploading}
-                    title={session?.user ? "Upload PDF, TXT, or DOCX (max 10MB)" : "Sign in to upload files"}
+                    disabled={!session?.user || !hasGeminiApiKey || isUploading}
+                    title={
+                      !session?.user 
+                        ? "Sign in to upload files" 
+                        : !hasGeminiApiKey 
+                          ? "Configure Gemini API in settings to upload files" 
+                          : "Upload PDF, TXT, or DOCX (max 10MB)"
+                    }
                   >
                     {isUploading ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
@@ -380,9 +416,9 @@ export default function ChatPage() {
                 <Button
                   type="submit"
                   size="lg"
-                  disabled={!session?.user}
+                  disabled={!session?.user || !hasGeminiApiKey}
                   className={`h-[52px] w-[52px] rounded-2xl transition-all duration-200 ${
-                    session?.user 
+                    session?.user && hasGeminiApiKey
                       ? 'bg-blue-500 hover:bg-blue-600 text-white' 
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
@@ -397,7 +433,11 @@ export default function ChatPage() {
       </div>
 
       {/* Settings Dialog */}
-      <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+      <SettingsDialog 
+        open={isSettingsOpen} 
+        onOpenChange={setIsSettingsOpen} 
+        onApiKeyStatusChange={handleApiKeyStatusChange}
+      />
       
       {/* Past Events Dialog */}
       <PastEventsDialog open={isPastEventsOpen} onOpenChange={setIsPastEventsOpen} />

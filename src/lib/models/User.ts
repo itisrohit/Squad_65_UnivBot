@@ -3,7 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose'
 export interface IUser extends Document {
   email: string
   name: string
-  studentId?: string
+  geminiApiKey?: string
   createdAt: Date
   updatedAt: Date
   lastActive: Date
@@ -22,9 +22,10 @@ const UserSchema = new Schema<IUser>({
     required: true,
     trim: true
   },
-  studentId: {
+  geminiApiKey: {
     type: String,
-    trim: true
+    trim: true,
+    select: false // Don't include in queries by default for security
   },
   lastActive: {
     type: Date,
@@ -33,9 +34,6 @@ const UserSchema = new Schema<IUser>({
 }, {
   timestamps: true
 })
-
-// Create index for better query performance (removed duplicate)
-UserSchema.index({ studentId: 1 })
 
 // Prevent mongoose from creating the model multiple times
 export const User = mongoose.models.User || mongoose.model<IUser>('User', UserSchema) 

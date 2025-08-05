@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useSession, signOut } from "next-auth/react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,22 +10,143 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Palette, Moon, Sun, Monitor, Key, LogOut, User, Mail } from "lucide-react"
+import { Palette, Moon, Sun, Monitor, Key, LogOut, User, Mail, Check, AlertCircle, Loader2, Trash2 } from "lucide-react"
 
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onApiKeyStatusChange?: (hasApiKey: boolean) => void
 }
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange, onApiKeyStatusChange }: SettingsDialogProps) {
   const { theme, setTheme } = useTheme()
   const { data: session } = useSession()
   const [geminiApiKey, setGeminiApiKey] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
+  const [isValidating, setIsValidating] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle")
+  const [hasApiKey, setHasApiKey] = useState(false)
 
-  const handleReset = () => {
-    setTheme("system")
-    setGeminiApiKey("")
+  // Load API key status when dialog opens
+  useEffect(() => {
+    if (open && session?.user) {
+      loadApiKeyStatus()
+    }
+  }, [open, session])
+
+  const loadApiKeyStatus = async () => {
+    try {
+      const response = await fetch('/api/user/gemini-api-key')
+      if (response.ok) {
+        const data = await response.json()
+        setHasApiKey(data.hasApiKey)
+      }
+    } catch (error) {
+      console.error('Error loading API key status:', error)
+    }
   }
+
+  const validateGeminiApiKey = async (apiKey: string): Promise<boolean> => {
+    try {
+      // Use the official Google AI API endpoint with gemini-2.5-flash-lite for faster response
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: "Hi"
+            }]
+          }]
+        })
+      })
+      
+      return response.ok
+    } catch (error) {
+      return false
+    }
+  }
+
+  const handleSaveApiKey = async () => {
+    if (!geminiApiKey.trim()) {
+      setSaveStatus("error")
+      return
+    }
+
+    setIsSaving(true)
+    setIsValidating(true)
+    setSaveStatus("idle")
+
+    try {
+      // First validate the API key
+      const isValid = await validateGeminiApiKey(geminiApiKey.trim())
+      
+      if (!isValid) {
+        setSaveStatus("error")
+        return
+      }
+
+      // If valid, save to database
+      const response = await fetch('/api/user/gemini-api-key', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ geminiApiKey: geminiApiKey.trim() }),
+      })
+
+      if (response.ok) {
+        setSaveStatus("success")
+        setHasApiKey(true)
+        setGeminiApiKey("") // Clear input after successful save
+        setTimeout(() => setSaveStatus("idle"), 3000)
+        // Notify parent component
+        onApiKeyStatusChange?.(true)
+      } else {
+        setSaveStatus("error")
+      }
+    } catch (error) {
+      console.error('Error saving API key:', error)
+      setSaveStatus("error")
+    } finally {
+      setIsSaving(false)
+      setIsValidating(false)
+    }
+  }
+
+  const handleDeleteApiKey = async () => {
+    setIsDeleting(true)
+    setSaveStatus("idle")
+
+    try {
+      const response = await fetch('/api/user/gemini-api-key', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        setHasApiKey(false)
+        setSaveStatus("success")
+        setTimeout(() => setSaveStatus("idle"), 3000)
+        // Notify parent component
+        onApiKeyStatusChange?.(false)
+      } else {
+        setSaveStatus("error")
+      }
+    } catch (error) {
+      console.error('Error deleting API key:', error)
+      setSaveStatus("error")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
 
   const handleSignOut = async () => {
     await signOut({ callbackUrl: "/" })
@@ -101,26 +222,77 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <div className="space-y-2">
                 <div className="space-y-1">
                   <Label htmlFor="gemini-api-key">Gemini API Key</Label>
-                  <p className="text-sm text-muted-foreground break-words">Enter your Gemini API key to access the features</p>
+                  <p className="text-sm text-muted-foreground break-words">
+                    Enter your Gemini API key to enable AI features and document processing
+                  </p>
+                  {hasApiKey && (
+                    <div className="flex items-center gap-2 text-sm text-green-600">
+                      <Check className="h-4 w-4" />
+                      API key is configured
+                    </div>
+                  )}
                 </div>
                 <Input
                   id="gemini-api-key"
                   type="password"
-                  placeholder="Enter your Gemini API key"
+                  placeholder={hasApiKey ? "••••••••••••••••" : "Enter your Gemini API key"}
                   value={geminiApiKey}
                   onChange={(e) => setGeminiApiKey(e.target.value)}
                   className="w-full"
                 />
-                <div className="flex justify-end">
+                <div className="flex items-center gap-2">
                   <Button 
-                    onClick={() => {
-                      // Save API key logic here
-                      console.log("API key saved:", geminiApiKey)
-                    }}
+                    onClick={handleSaveApiKey}
+                    disabled={isSaving || !geminiApiKey.trim()}
                     className="bg-blue-500 hover:bg-blue-600"
                   >
-                    Save API Key
+                    {isSaving ? (
+                      <>
+                        {isValidating ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Validating...
+                          </>
+                        ) : (
+                          "Saving..."
+                        )}
+                      </>
+                    ) : (
+                      "Save API Key"
+                    )}
                   </Button>
+                  {hasApiKey && (
+                    <Button
+                      variant="outline"
+                      onClick={handleDeleteApiKey}
+                      disabled={isDeleting}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      {isDeleting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete API Key
+                        </>
+                      )}
+                    </Button>
+                  )}
+                  {saveStatus === "success" && (
+                    <div className="flex items-center gap-2 text-sm text-green-600">
+                      <Check className="h-4 w-4" />
+                      {hasApiKey ? "Saved successfully!" : "Deleted successfully!"}
+                    </div>
+                  )}
+                  {saveStatus === "error" && (
+                    <div className="flex items-center gap-2 text-sm text-red-600">
+                      <AlertCircle className="h-4 w-4" />
+                      Invalid API key
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -166,8 +338,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </>
           )}
         </div>
-
-        {/* Footer Actions - Removed */}
       </DialogContent>
     </Dialog>
   )
