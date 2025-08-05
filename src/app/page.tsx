@@ -18,6 +18,48 @@ import { SignInDialog } from "@/components/sign-in-dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 
+function DocumentLoadingUI({ file, onRemove, isProcessing }: { file: File; onRemove?: () => void; isProcessing?: boolean }) {
+  const getFileIcon = (type: string) => {
+    if (type.includes('pdf')) return '📄'
+    if (type.includes('text')) return '📝'
+    if (type.includes('word')) return '📄'
+    return '📎'
+  }
+
+  const getFileType = (type: string) => {
+    if (type.includes('pdf')) return 'PDF'
+    if (type.includes('text')) return 'TXT'
+    if (type.includes('word')) return 'DOCX'
+    return 'FILE'
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-full border border-border/30 max-w-[200px]">
+      <div className="relative">
+        <div className="text-sm">{getFileIcon(file.type)}</div>
+        {isProcessing && (
+          <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+            <div className="w-1.5 h-1.5 border border-white border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-foreground text-xs truncate">{file.name}</div>
+      </div>
+      {onRemove && !isProcessing && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRemove}
+          className="h-4 w-4 p-0 hover:bg-destructive/10 hover:text-destructive ml-1"
+        >
+          ×
+        </Button>
+      )}
+    </div>
+  )
+}
+
 function ChatMessage({ message, isUser }: { message: string; isUser: boolean }) {
   return (
     <div className={cn("flex w-full mb-6 animate-fadeIn", isUser ? "justify-end" : "justify-start")}>
@@ -102,6 +144,16 @@ export default function ChatPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!input.trim() && selectedFiles.length === 0) {
+      return
+    }
+
+    // If files are already uploaded, clear them
+    if (selectedFiles.length > 0 && !isUploading) {
+      setSelectedFiles([])
+    }
+
     // Chat functionality temporarily disabled
     // if (input.trim() && chatStatus === "ready") {
     //   setIsAnimating(true)
@@ -134,11 +186,9 @@ export default function ChatPage() {
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('📁 File selected:', e.target.files)
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
       const file = files[0]
-      console.log('📄 Processing file:', file.name, file.type, file.size)
       
       // Validate file type
       const allowedTypes = [
@@ -159,41 +209,37 @@ export default function ChatPage() {
         return
       }
       
+      // Add to selected files and upload immediately
       setSelectedFiles(prev => [...prev, ...files])
       handleFileUpload(file) // Process the first file
+      
+      // Reset file input so it can be used again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     }
   }
 
   const handleAttachmentClick = () => {
-    console.log('📎 Attachment button clicked')
-    console.log('🔍 Session user:', session?.user)
-    console.log('🔍 File input ref:', fileInputRef.current)
     fileInputRef.current?.click()
   }
 
   const handleFileUpload = async (file: File) => {
-    console.log('🚀 Starting file upload for:', file.name)
     
     if (!session?.user) {
-      console.log("❌ User not authenticated, skipping file upload")
       return
     }
 
-    console.log('✅ User authenticated, proceeding with upload')
     setIsUploading(true)
     
     try {
       const formData = new FormData()
       formData.append('file', file)
-      console.log('📦 FormData created with file:', file.name)
 
-      console.log('🌐 Sending request to /api/upload')
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       })
-
-      console.log('📡 Response status:', response.status, response.statusText)
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -202,7 +248,6 @@ export default function ChatPage() {
       }
 
       const result = await response.json()
-      console.log('✅ File uploaded and processed successfully:', result)
       
       // You can store the chunks in state or context for later use in RAG
       // For now, we're just logging them
@@ -211,7 +256,6 @@ export default function ChatPage() {
       console.error('❌ File upload error:', error)
     } finally {
       setIsUploading(false)
-      console.log('🏁 Upload process completed')
     }
   }
 
@@ -358,7 +402,21 @@ export default function ChatPage() {
           {/* Input Area - Disabled */}
           <div className="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="max-w-4xl mx-auto p-4 w-full">
-              <div className="flex gap-3 items-end">
+              {/* Document Loading UI */}
+              {selectedFiles.length > 0 && (
+                <div className="mb-3">
+                  {selectedFiles.map((file, index) => (
+                    <DocumentLoadingUI 
+                      key={index} 
+                      file={file} 
+                      onRemove={() => removeFile(index)} 
+                      isProcessing={isUploading}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="flex gap-3 items-end">
                 <div className="flex-1 relative">
                   <Textarea
                     ref={textareaRef}
@@ -370,10 +428,14 @@ export default function ChatPage() {
                         ? "Sign in to start chatting..." 
                         : !hasGeminiApiKey 
                           ? "Configure Gemini API in settings to use UnivBot" 
-                          : "Type something..."
+                          : selectedFiles.length > 0
+                            ? isUploading 
+                              ? "Processing document..."
+                              : "Type a question about your document or just press send to analyze..."
+                            : "Type something..."
                     }
                     className="min-h-[52px] max-h-[120px] resize-none rounded-2xl border-2 focus:border-blue-500 transition-all duration-200 pr-12 py-3"
-                    disabled={!session?.user || !hasGeminiApiKey}
+                    disabled={!session?.user || !hasGeminiApiKey || isUploading}
                     rows={1}
                   />
                   {/* Hidden file input */}
@@ -391,34 +453,32 @@ export default function ChatPage() {
                     variant="ghost"
                     size="sm"
                     className={`absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 transition-colors duration-200 ${
-                      session?.user && hasGeminiApiKey
+                      session?.user && hasGeminiApiKey && selectedFiles.length === 0
                         ? 'hover:bg-blue-100 hover:text-blue-600' 
                         : 'text-gray-400 cursor-not-allowed'
                     }`}
                     onClick={handleAttachmentClick}
-                    disabled={!session?.user || !hasGeminiApiKey || isUploading}
+                    disabled={!session?.user || !hasGeminiApiKey || isUploading || selectedFiles.length > 0}
                     title={
                       !session?.user 
                         ? "Sign in to upload files" 
                         : !hasGeminiApiKey 
                           ? "Configure Gemini API in settings to upload files" 
-                          : "Upload PDF, TXT, or DOCX (max 10MB)"
+                          : selectedFiles.length > 0
+                            ? "Remove current file first"
+                            : "Upload PDF, TXT, or DOCX (max 10MB)"
                     }
                   >
-                    {isUploading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                    ) : (
-                      <Paperclip className="h-4 w-4" />
-                    )}
+                    <Paperclip className="h-4 w-4" />
                     <span className="sr-only">Attach file</span>
                   </Button>
                 </div>
                 <Button
                   type="submit"
                   size="lg"
-                  disabled={!session?.user || !hasGeminiApiKey}
+                  disabled={!session?.user || !hasGeminiApiKey || isUploading}
                   className={`h-[52px] w-[52px] rounded-2xl transition-all duration-200 ${
-                    session?.user && hasGeminiApiKey
+                    session?.user && hasGeminiApiKey && !isUploading
                       ? 'bg-blue-500 hover:bg-blue-600 text-white' 
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
@@ -426,7 +486,7 @@ export default function ChatPage() {
                   <Send className="h-5 w-5" />
                   <span className="sr-only">Send message</span>
                 </Button>
-              </div>
+              </form>
             </div>
           </div>
         </div>
